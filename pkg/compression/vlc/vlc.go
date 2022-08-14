@@ -1,28 +1,71 @@
 package vlc
 
 import (
+	"archiver/pkg/compression/vlc/table"
+	"bytes"
+	"encoding/binary"
+	"encoding/gob"
+	"log"
 	"strings"
-	"unicode"
 )
 
-type EncoderDecoder struct{}
-
-func NewEncoderDecoder() EncoderDecoder {
-	return EncoderDecoder{}
+type EncoderDecoder struct {
+	tblGenerator table.Generator
 }
 
-type encodingTable map[rune]string
-
-var table = getEncodingTable()
+func NewEncoderDecoder(tblGenerator table.Generator) EncoderDecoder {
+	return EncoderDecoder{
+		tblGenerator: tblGenerator,
+	}
+}
 
 func (ed EncoderDecoder) Encode(str string) []byte {
-	str = prepareText(str)
+	tbl := ed.tblGenerator.NewTable(str)
 
-	str = encodeBin(str)
+	encoded := encodeBin(str, tbl)
 
-	chunks := splitByChunks(str, chunkLength)
+	return buildEncodedFile(encoded, tbl)
+}
 
-	return chunks.Bytes()
+func buildEncodedFile(data string, tbl table.EncodingTable) []byte {
+	encodedTbl := encodeTable(tbl)
+
+	var buf bytes.Buffer
+
+	buf.Write(encodeInt(len(encodedTbl)))
+	buf.Write(encodeInt(len(data)))
+	buf.Write(encodedTbl)
+	buf.Write(splitByChunks(data, chunkLength).Bytes())
+
+	return buf.Bytes()
+}
+
+func encodeTable(tbl table.EncodingTable) []byte {
+	var tableBuf bytes.Buffer
+
+	if err := gob.NewEncoder(&tableBuf).Encode(tbl); err != nil {
+		log.Fatal("can't serialize table: ", err)
+	}
+
+	return tableBuf.Bytes()
+}
+
+func decodeTable(tblBinary []byte) table.EncodingTable {
+	var tbl table.EncodingTable
+
+	r := bytes.NewReader(tblBinary)
+	if err := gob.NewDecoder(r).Decode(&tbl); err != nil {
+		log.Fatal("can't decode table: ", err)
+	}
+
+	return tbl
+}
+
+func encodeInt(num int) []byte {
+	res := make([]byte, 4)
+	binary.BigEndian.PutUint32(res, uint32(num))
+
+	return res
 }
 
 func (ed EncoderDecoder) Extension() string {
@@ -30,80 +73,44 @@ func (ed EncoderDecoder) Extension() string {
 }
 
 func (ed EncoderDecoder) Decode(encodedData []byte) string {
-	str := NewBinChunks(encodedData).Join()
+	tbl, data := parseFile(encodedData)
 
-	dt := getEncodingTable().DecodingTree()
-
-	return exportText(dt.Decode(str))
+	return tbl.Decode(data)
 }
 
-// prepareText format text
-// capitalized to lower cased with "!" before
-func prepareText(str string) string {
-	if str == "" {
-		return ""
-	}
+func parseFile(data []byte) (table.EncodingTable, string) {
+	const (
+		tableSizeBytesCount = 4
+		dataSizeBytesCount  = 4
+	)
 
-	var buf strings.Builder
+	tableSizeBinary, data := data[:tableSizeBytesCount], data[tableSizeBytesCount:]
+	dataSizeBinary, data := data[:dataSizeBytesCount], data[dataSizeBytesCount:]
 
-	for _, x := range str {
-		if unicode.IsUpper(x) {
-			buf.WriteString("!")
-			buf.WriteRune(unicode.ToLower(x))
-		} else {
-			buf.WriteRune(x)
-		}
-	}
+	tableSize := binary.BigEndian.Uint32(tableSizeBinary)
+	dataSize := binary.BigEndian.Uint32(dataSizeBinary)
 
-	return buf.String()
-}
+	tblBinary, data := data[:tableSize], data[tableSize:]
 
-// exportText format text
-// lower to capitalized if "!" before
-func exportText(str string) string {
-	if str == "" {
-		return ""
-	}
+	tbl := decodeTable(tblBinary)
 
-	var buf strings.Builder
+	body := NewBinChunks(data).Join()
 
-	nextLetterShouldBeCapitalized := false
-
-	for _, x := range str {
-		if x == '!' {
-			nextLetterShouldBeCapitalized = true
-			continue
-		}
-
-		if nextLetterShouldBeCapitalized && !unicode.IsLower(x) {
-			buf.WriteRune('!')
-			nextLetterShouldBeCapitalized = false
-		}
-
-		if nextLetterShouldBeCapitalized && unicode.IsLower(x) {
-			buf.WriteRune(unicode.ToUpper(x))
-		} else {
-			buf.WriteRune(x)
-		}
-
-		nextLetterShouldBeCapitalized = false
-	}
-
-	return buf.String()
+	return tbl, body[:dataSize]
 }
 
 // encodeBin converts string to binary
-func encodeBin(str string) string {
+func encodeBin(str string, table table.EncodingTable) string {
 	var buf strings.Builder
 
 	for _, x := range str {
-		buf.WriteString(bin(x))
+		buf.WriteString(bin(x, table))
 	}
 
 	return buf.String()
 }
 
-func bin(r rune) string {
+func bin(r rune, table table.EncodingTable) string {
 	b, ok := table[r]
 
 	if !ok {
@@ -111,37 +118,4 @@ func bin(r rune) string {
 	}
 
 	return b
-}
-
-func getEncodingTable() encodingTable {
-	return encodingTable{
-		' ': "11",
-		't': "1001",
-		'n': "10000",
-		's': "0101",
-		'r': "01000",
-		'd': "00101",
-		'!': "001000",
-		'c': "000101",
-		'm': "000011",
-		'g': "0000100",
-		'b': "0000010",
-		'v': "00000001",
-		'k': "0000000001",
-		'q': "000000000001",
-		'e': "101",
-		'o': "10001",
-		'a': "011",
-		'i': "01001",
-		'h': "0011",
-		'l': "001001",
-		'u': "00011",
-		'f': "000100",
-		'p': "0000101",
-		'w': "0000011",
-		'y': "0000001",
-		'j': "000000001",
-		'x': "00000000001",
-		'z': "000000000000",
-	}
 }

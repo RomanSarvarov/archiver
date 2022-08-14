@@ -5,25 +5,6 @@ import (
 )
 import "github.com/stretchr/testify/require"
 
-func TestPrepareText(t *testing.T) {
-	tests := []struct {
-		str      string
-		expected string
-	}{
-		{str: "", expected: ""},
-		{str: "abc", expected: "abc"},
-		{str: "aBc", expected: "a!bc"},
-		{str: "123", expected: "123"},
-		{str: "Hello World!", expected: "!hello !world!"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.str, func(t *testing.T) {
-			require.Equal(t, tt.expected, prepareText(tt.str))
-		})
-	}
-}
-
 func TestEncodeBin(t *testing.T) {
 	tests := []struct {
 		str      string

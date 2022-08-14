@@ -3,6 +3,7 @@ package cmd
 import (
 	"archiver/pkg/compression"
 	"archiver/pkg/compression/vlc"
+	"archiver/pkg/compression/vlc/table/shannon_fano"
 	"errors"
 	"fmt"
 	"github.com/spf13/cobra"
@@ -31,7 +32,7 @@ func pack(cmd *cobra.Command, args []string) {
 
 	switch method {
 	case "vlc":
-		encoder = vlc.NewEncoderDecoder()
+		encoder = vlc.NewEncoderDecoder(shannon_fano.NewGenerator())
 	default:
 		cmd.PrintErrln("that method not exists")
 	}
